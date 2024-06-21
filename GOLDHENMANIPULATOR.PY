@@ -23,20 +23,15 @@ compressed_size_file_path = os.path.join(current_dir, compressed_size_file_name)
 # Offsets de las secciones
 compressed_section_offset = 0x2D20
 elf_section_offset = 0x3525C
-additional_bytes_offset = 0x35257  # Offset de los bytes adicionales "FA 38 25 03 00"
 
-# Función para descomponer el archivo original y extraer la sección ELF y los bytes adicionales
+# Función para descomponer el archivo original y extraer la sección ELF
 def descomponer_archivo():
     with open(input_file_path, "rb") as file:
         # Leer la parte anterior a la sección comprimida
         header_data = file.read(compressed_section_offset)
-        # Leer la sección comprimida completa
-        compressed_data = file.read()
-
-        # Mover el puntero al inicio de los bytes adicionales
-        file.seek(additional_bytes_offset)
-        # Leer los bytes adicionales
-        additional_bytes_data = file.read(5)
+        # Leer la sección comprimida completa desde el offset
+        file.seek(compressed_section_offset)
+        compressed_data = file.read(elf_section_offset - compressed_section_offset)
 
         # Mover el puntero al inicio de la sección ELF
         file.seek(elf_section_offset)
@@ -53,8 +48,8 @@ def descomponer_archivo():
 
             # Guardar la sección ELF extraída
             with open(elf_section_path, "wb") as elf_section_file:
-                elf_section_file.write(additional_bytes_data + elf_section_data)
-            print(f"Sección ELF extraída con bytes adicionales guardada en: {elf_section_path}")
+                elf_section_file.write(elf_section_data)
+            print(f"Sección ELF extraída guardada en: {elf_section_path}")
 
             # Guardar el tamaño de la sección comprimida
             compressed_size = len(compressed_data)
@@ -71,10 +66,16 @@ def recomponer_archivo():
         with open(modified_elf_path, "rb") as modified_elf:
             modified_data = modified_elf.read()
 
-        # Comprimir los datos modificados
-        compressed_modified_data = zlib.compress(modified_data)
+        # Crear un objeto de compresión con el nivel de mejor compresión `zlib.Z_BEST_COMPRESSION`
+        # Usamos `wbits=15` para la compresión estándar que generará `78 9C`
+        compressor = zlib.compressobj(level=zlib.Z_BEST_COMPRESSION, wbits=15)
+        compressed_modified_data = compressor.compress(modified_data) + compressor.flush()
 
-        # Leer la sección ELF extraída junto con los bytes adicionales
+        # Verificar el encabezado de la compresión
+        if compressed_modified_data[:2] != b'\x78\x9C':
+            print("Advertencia: La compresión no ha producido el encabezado esperado `78 9C`.")
+
+        # Leer la sección ELF extraída
         with open(elf_section_path, "rb") as elf_section_file:
             elf_section_data = elf_section_file.read()
 
@@ -92,9 +93,9 @@ def recomponer_archivo():
             output_file.write(original_data[:compressed_section_offset])
             # Escribir la nueva sección comprimida
             output_file.write(compressed_modified_data)
-            # Escribir la parte posterior al offset hasta el inicio de los bytes adicionales
-            output_file.write(original_data[compressed_section_offset + original_compressed_data_size:additional_bytes_offset])
-            # Añadir los bytes adicionales y la sección ELF
+            # Escribir la parte posterior al offset hasta el inicio de la sección ELF
+            output_file.write(original_data[compressed_section_offset + original_compressed_data_size:elf_section_offset])
+            # Añadir la sección ELF
             output_file.write(elf_section_data)
 
         print(f"Archivo recompuesto guardado en: {output_file_path}")
